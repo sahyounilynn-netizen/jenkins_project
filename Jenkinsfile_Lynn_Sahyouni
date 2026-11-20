@@ -1,0 +1,51 @@
+// Jenkinsfile_Lynn_Sahyouni - Lab 10, Part 3 (basic CI/CD pipeline)
+// The Jenkins agent is Windows, so every step uses `bat` and calls the
+// virtual environment's python.exe directly instead of activating it.
+pipeline {
+    agent any
+
+    environment {
+        VIRTUAL_ENV = 'venv'
+        VENV_PY = 'venv\\Scripts\\python.exe'
+        // Python launcher on the Windows agent; 3.13 is the stable interpreter installed there.
+        PYTHON_LAUNCHER = 'py -3.13'
+    }
+
+    stages {
+        stage('Setup') {
+            steps {
+                script {
+                    if (!fileExists("${env.WORKSPACE}\\${VIRTUAL_ENV}\\Scripts\\python.exe")) {
+                        bat "${PYTHON_LAUNCHER} -m venv ${VIRTUAL_ENV}"
+                    }
+                }
+                bat "${VENV_PY} -m pip install --disable-pip-version-check -r requirements.txt"
+            }
+        }
+
+        stage('Lint') {
+            steps {
+                bat "${VENV_PY} -m flake8 app.py tests"
+            }
+        }
+
+        stage('Test') {
+            steps {
+                bat "${VENV_PY} -m pytest -v"
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                // Deployment logic, e.g., pushing to a remote server
+                echo 'Deploying application...'
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
