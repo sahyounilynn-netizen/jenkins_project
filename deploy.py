@@ -10,7 +10,8 @@ import argparse
 import datetime
 import os
 import shutil
-import subprocess  # nosec B404 - only used to run the deployed app with a fixed argument list
+# subprocess is only used to run the deployed app with a fixed argument list (Bandit B404 reviewed).
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -64,7 +65,8 @@ def copy_release(deploy_root, build_id, commit):
 def run_deployed_app(current_dir):
     """Execute the deployed copy of app.py and return (exit code, stripped stdout, stderr)."""
     command = [base_python(), str(current_dir / "app.py")]
-    result = subprocess.run(  # nosec B603 - fixed argument list, no shell, trusted local file
+    # Fixed argument list, no shell, trusted local file (Bandit B603 reviewed).
+    result = subprocess.run(  # nosec B603
         command, cwd=current_dir, capture_output=True, text=True, timeout=60, check=False
     )
     return result.returncode, result.stdout.strip(), result.stderr.strip(), command
