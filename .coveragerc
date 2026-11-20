@@ -1,0 +1,9 @@
+[run]
+branch = True
+include =
+    app.py
+    deploy.py
+
+[report]
+show_missing = True
+precision = 1

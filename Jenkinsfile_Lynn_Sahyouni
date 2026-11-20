@@ -1,4 +1,5 @@
-// Jenkinsfile_Lynn_Sahyouni - Lab 10, Part 3 (basic CI/CD pipeline)
+// Jenkinsfile_Lynn_Sahyouni - Lab 10, Part 4
+// Setup -> Lint -> Test -> Coverage -> Security Scan -> Deploy
 // The Jenkins agent is Windows, so every step uses `bat` and calls the
 // virtual environment's python.exe directly instead of activating it.
 pipeline {
@@ -9,6 +10,9 @@ pipeline {
         VENV_PY = 'venv\\Scripts\\python.exe'
         // Python launcher on the Windows agent; 3.13 is the stable interpreter installed there.
         PYTHON_LAUNCHER = 'py -3.13'
+        REPORTS = 'reports'
+        // Outside the workspace, so cleanWs() does not remove the deployed application.
+        DEPLOY_ROOT = "${env.USERPROFILE}\\Lab10_Deploy\\Python-CI-CD"
     }
 
     stages {
@@ -20,31 +24,73 @@ pipeline {
                     }
                 }
                 bat "${VENV_PY} -m pip install --disable-pip-version-check -r requirements.txt"
+                bat "if not exist ${REPORTS} mkdir ${REPORTS}"
             }
         }
 
         stage('Lint') {
             steps {
-                bat "${VENV_PY} -m flake8 app.py tests"
+                // Checks app.py, deploy.py and tests; venv, reports and caches are excluded in .flake8
+                bat "${VENV_PY} -m flake8 ."
             }
         }
 
         stage('Test') {
             steps {
-                bat "${VENV_PY} -m pytest -v"
+                bat "${VENV_PY} -m pytest -v --junitxml=${REPORTS}\\junit.xml"
+            }
+        }
+
+        stage('Coverage') {
+            steps {
+                // .coveragerc measures app.py and deploy.py with branch coverage
+                bat "${VENV_PY} -m coverage run -m pytest -q"
+                bat """
+                    ${VENV_PY} -m coverage report --fail-under=90 > ${REPORTS}\\coverage.txt
+                    set COVERAGE_RC=%ERRORLEVEL%
+                    type ${REPORTS}\\coverage.txt
+                    exit /b %COVERAGE_RC%
+                """
+                bat "${VENV_PY} -m coverage xml -o ${REPORTS}\\coverage.xml"
+                bat "${VENV_PY} -m coverage html -d ${REPORTS}\\htmlcov"
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                // Any unsuppressed Bandit finding returns a non-zero exit code and fails the build.
+                bat """
+                    ${VENV_PY} -m bandit -r app.py deploy.py tests -f txt -o ${REPORTS}\\bandit.txt
+                    set BANDIT_RC=%ERRORLEVEL%
+                    type ${REPORTS}\\bandit.txt
+                    exit /b %BANDIT_RC%
+                """
+                bat "${VENV_PY} -m bandit -r app.py deploy.py tests -f json -o ${REPORTS}\\bandit.json"
             }
         }
 
         stage('Deploy') {
             steps {
-                // Deployment logic, e.g., pushing to a remote server
-                echo 'Deploying application...'
+                bat "${VENV_PY} deploy.py --deploy-root \"${DEPLOY_ROOT}\" --build-id %BUILD_NUMBER% --commit %GIT_COMMIT% --report ${REPORTS}\\deploy_verification.txt"
             }
         }
     }
 
     post {
         always {
+            archiveArtifacts artifacts: 'reports/**', allowEmptyArchive: true
+            junit testResults: 'reports/junit.xml', allowEmptyResults: true
+        }
+        unsuccessful {
+            // Collect environment details to help diagnose a failed stage.
+            bat(label: 'Collect diagnostics', returnStatus: true, script: """
+                if not exist ${REPORTS} mkdir ${REPORTS}
+                (echo Build %BUILD_NUMBER% commit %GIT_COMMIT% & where git & py -0p & dir /b /s ${REPORTS} & ${VENV_PY} -m pip list) > ${REPORTS}\\diagnostics.txt 2>&1
+                type ${REPORTS}\\diagnostics.txt
+            """)
+            archiveArtifacts artifacts: 'reports/diagnostics.txt', allowEmptyArchive: true
+        }
+        cleanup {
             cleanWs()
         }
     }
